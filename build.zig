@@ -227,16 +227,22 @@ fn configureOdeIncludes(
     trimesh: TrimeshLibrary,
     index_size: IndexSize,
 ) void {
-    m.addIncludePath(b.path("include/common"));
+    // Generate config headers at build time (replaces checked-in include/ directory).
+    // The upstream ODE headers expect ode/precision.h, ode/version.h, and config.h
+    // which are normally produced by CMake's configure_file().
+    const gen = b.addWriteFiles();
+    _ = gen.add("config.h", config_h);
+    _ = gen.add("ode/precision.h", precision_h);
+    _ = gen.add("ode/version.h", version_h);
+    m.addIncludePath(gen.getDirectory());
+
     m.addIncludePath(upstream.path("include"));
     switch (precision) {
         .single => {
-            m.addIncludePath(b.path("include/single"));
             m.addCMacro("dIDESINGLE", "1");
             m.addCMacro("CCD_IDESINGLE", "1");
         },
         .double => {
-            m.addIncludePath(b.path("include/double"));
             m.addCMacro("dIDEDOUBLE", "1");
             m.addCMacro("CCD_IDEDOUBLE", "1");
         },
@@ -257,6 +263,128 @@ fn configureOdeIncludes(
         .u32 => {},
     }
 }
+
+const precision_h =
+    \\#ifndef _ODE_PRECISION_H_
+    \\#define _ODE_PRECISION_H_
+    \\
+    \\#if defined(dIDESINGLE)
+    \\#define dSINGLE
+    \\#elif defined(dIDEDOUBLE)
+    \\#define dDOUBLE
+    \\#else
+    \\#error "ODE precision not defined: set dIDESINGLE or dIDEDOUBLE"
+    \\#endif
+    \\
+    \\#endif
+    \\
+;
+
+const version_h =
+    \\#ifndef _ODE_VERSION_H_
+    \\#define _ODE_VERSION_H_
+    \\
+    \\#define dODE_VERSION "0.16.0"
+    \\
+    \\#endif
+    \\
+;
+
+const config_h =
+    \\#ifndef ODE_CONFIG_H
+    \\#define ODE_CONFIG_H
+    \\
+    \\/* Platform identification */
+    \\#if defined(_XENON)
+    \\#define ODE_PLATFORM_XBOX360
+    \\#elif defined(SN_TARGET_PSP_HW)
+    \\#define ODE_PLATFORM_PSP
+    \\#elif defined(SN_TARGET_PS3)
+    \\#define ODE_PLATFORM_PS3
+    \\#elif defined(_MSC_VER) || defined(__CYGWIN__) || defined(__MINGW32__)
+    \\#define ODE_PLATFORM_WINDOWS
+    \\#elif defined(__linux__)
+    \\#define ODE_PLATFORM_LINUX
+    \\#elif defined(__APPLE__) && defined(__MACH__)
+    \\#define ODE_PLATFORM_OSX
+    \\#elif defined(__FreeBSD__)
+    \\#define ODE_PLATFORM_FREEBSD
+    \\#else
+    \\#error "Need some help identifying the platform!"
+    \\#endif
+    \\
+    \\#if defined(ODE_PLATFORM_WINDOWS) && !defined(WIN32)
+    \\#define WIN32
+    \\#endif
+    \\
+    \\#if defined(__CYGWIN__) || defined(__MINGW32__)
+    \\#define CYGWIN
+    \\#endif
+    \\
+    \\#if defined(ODE_PLATFORM_OSX)
+    \\#define macintosh
+    \\#endif
+    \\
+    \\/* POSIX features */
+    \\#if !defined(ODE_PLATFORM_WINDOWS)
+    \\#define HAVE_ALLOCA_H 1
+    \\#define HAVE_GETTIMEOFDAY 1
+    \\#define HAVE_SYS_TIME_H 1
+    \\#define HAVE_UNISTD_H 1
+    \\#endif
+    \\
+    \\#if !defined(__APPLE__)
+    \\#define HAVE_MALLOC_H 1
+    \\#endif
+    \\
+    \\/* Standard C99+ headers */
+    \\#define HAVE_STDINT_H 1
+    \\#define HAVE_INTTYPES_H 1
+    \\#define HAVE_SYS_TYPES_H 1
+    \\
+    \\/* isnan variants */
+    \\#define HAVE_ISNAN 1
+    \\#if !defined(_MSC_VER)
+    \\#define HAVE_ISNANF 1
+    \\#define HAVE___ISNAN 1
+    \\#define HAVE___ISNANF 1
+    \\#endif
+    \\#if defined(_MSC_VER)
+    \\#define HAVE__ISNAN 1
+    \\#define HAVE__ISNANF 1
+    \\#endif
+    \\
+    \\/* pthread features */
+    \\#if !defined(__APPLE__) && !defined(ODE_PLATFORM_WINDOWS)
+    \\#define HAVE_PTHREAD_CONDATTR_SETCLOCK 1
+    \\#endif
+    \\
+    \\/* Apple OpenGL framework */
+    \\#if defined(ODE_PLATFORM_OSX)
+    \\#define HAVE_APPLE_OPENGL_FRAMEWORK 1
+    \\#endif
+    \\
+    \\#ifdef HAVE_ALLOCA_H
+    \\#include <alloca.h>
+    \\#endif
+    \\
+    \\#ifdef HAVE_MALLOC_H
+    \\#include <malloc.h>
+    \\#endif
+    \\
+    \\#ifdef HAVE_STDINT_H
+    \\#include <stdint.h>
+    \\#endif
+    \\
+    \\#ifdef HAVE_INTTYPES_H
+    \\#include <inttypes.h>
+    \\#endif
+    \\
+    \\#include "typedefs.h"
+    \\
+    \\#endif /* ODE_CONFIG_H */
+    \\
+;
 
 const ode_sources: []const []const u8 = &.{
     "ode/src/array.cpp",
