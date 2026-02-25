@@ -38,49 +38,49 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    const mod = lib.root_module;
+    const lib_mod = lib.root_module;
 
-    mod.addCMacro("DODE_LIB", "1");
+    lib_mod.addCMacro("DODE_LIB", "1");
 
     // Shared include paths and precision macros (used by both C lib and Zig module)
-    configureOdeIncludes(mod, b, upstream, precision, trimesh, index_size);
+    configureOdeIncludes(lib_mod, b, upstream, precision, trimesh, index_size);
 
     // Additional internal include paths (C lib only)
-    mod.addIncludePath(upstream.path("ode/src"));
-    mod.addIncludePath(upstream.path("ode/src/joints"));
-    mod.addIncludePath(upstream.path("ou/include"));
+    lib_mod.addIncludePath(upstream.path("ode/src"));
+    lib_mod.addIncludePath(upstream.path("ode/src/joints"));
+    lib_mod.addIncludePath(upstream.path("ou/include"));
 
     // Platform-specific configuration
     if (target.result.os.tag.isDarwin()) {
-        mod.addCMacro("MAC_OS_X_VERSION", "1050");
+        lib_mod.addCMacro("MAC_OS_X_VERSION", "1050");
     }
 
     // OU configuration
-    mod.addCMacro("_OU_NAMESPACE", "odeou");
-    mod.addCMacro("_OU_FEATURE_SET", if (ou)
+    lib_mod.addCMacro("_OU_NAMESPACE", "odeou");
+    lib_mod.addCMacro("_OU_FEATURE_SET", if (ou)
         "_OU_FEATURE_SET_TLS"
     else if (!no_threading_intf)
         "_OU_FEATURE_SET_ATOMICS"
     else
         "_OU_FEATURE_SET_BASICS");
-    mod.addCMacro("dOU_ENABLED", "1");
+    lib_mod.addCMacro("dOU_ENABLED", "1");
 
     if (ou) {
-        mod.addCMacro("dATOMICS_ENABLED", "1");
-        mod.addCMacro("dTLS_ENABLED", "1");
+        lib_mod.addCMacro("dATOMICS_ENABLED", "1");
+        lib_mod.addCMacro("dTLS_ENABLED", "1");
     } else if (!no_threading_intf) {
-        mod.addCMacro("dATOMICS_ENABLED", "1");
+        lib_mod.addCMacro("dATOMICS_ENABLED", "1");
     }
 
     // Threading configuration
     if (!no_builtin_threading_impl) {
-        mod.addCMacro("dBUILTIN_THREADING_IMPL_ENABLED", "1");
+        lib_mod.addCMacro("dBUILTIN_THREADING_IMPL_ENABLED", "1");
     }
     if (no_threading_intf) {
-        mod.addCMacro("dTHREADING_INTF_DISABLED", "1");
+        lib_mod.addCMacro("dTHREADING_INTF_DISABLED", "1");
     }
     if (no_builtin_threading_impl and no_threading_intf) {
-        mod.single_threaded = true;
+        lib_mod.single_threaded = true;
     }
 
     const cpp_flags: []const []const u8 = &.{
@@ -91,83 +91,97 @@ pub fn build(b: *std.Build) void {
         "-Wno-null-dereference",
     };
 
+    // Disable ODE internal assertions in non-Debug builds (matches CMake behavior)
+    if (optimize != .Debug) {
+        lib_mod.addCMacro("dNODEBUG", "1");
+    }
+
     // Core ODE sources
-    mod.addCSourceFiles(.{
+    lib_mod.addCSourceFiles(.{
         .root = upstream.path(""),
         .files = ode_sources,
         .flags = cpp_flags,
     });
 
+    // lcp.cpp has an upstream bug: an uninitialized bool array is swapped before
+    // being written, which is harmless but triggers UBSan. Compile it separately
+    // with bool sanitization disabled so dWorldStep works in Debug builds.
+    lib_mod.addCSourceFiles(.{
+        .root = upstream.path(""),
+        .files = &.{"ode/src/lcp.cpp"},
+        .flags = cpp_flags ++ &[_][]const u8{"-fno-sanitize=bool"},
+    });
+
     // Libccd configuration
     if (libccd) {
-        mod.addCMacro("dLIBCCD_ENABLED", "1");
+        lib_mod.addCMacro("dLIBCCD_ENABLED", "1");
 
         if (libccd_system) {
-            mod.addCMacro("dLIBCCD_SYSTEM", "1");
-            mod.linkSystemLibrary("ccd", .{});
+            lib_mod.addCMacro("dLIBCCD_SYSTEM", "1");
+            lib_mod.linkSystemLibrary("ccd", .{});
         } else {
-            mod.addIncludePath(upstream.path("libccd/src"));
-            mod.addCMacro("dLIBCCD_INTERNAL", "1");
-            mod.addCSourceFiles(.{
+            lib_mod.addIncludePath(upstream.path("libccd/src"));
+            lib_mod.addCMacro("dLIBCCD_INTERNAL", "1");
+            lib_mod.addCSourceFiles(.{
                 .root = upstream.path(""),
                 .files = libccd_sources,
                 .flags = cpp_flags,
             });
         }
 
-        mod.addCSourceFiles(.{
+        lib_mod.addCSourceFiles(.{
             .root = upstream.path(""),
             .files = libccd_addon_sources,
             .flags = cpp_flags,
         });
-        mod.addIncludePath(upstream.path("libccd/src/custom"));
+        lib_mod.addIncludePath(upstream.path("libccd/src/custom"));
 
-        if (libccd_box_cyl) mod.addCMacro("dLIBCCD_BOX_CYL", "1");
-        if (libccd_cap_cyl) mod.addCMacro("dLIBCCD_CAP_CYL", "1");
-        if (libccd_cyl_cyl) mod.addCMacro("dLIBCCD_CYL_CYL", "1");
-        if (libccd_convex_box) mod.addCMacro("dLIBCCD_CONVEX_BOX", "1");
-        if (libccd_convex_cap) mod.addCMacro("dLIBCCD_CONVEX_CAP", "1");
-        if (libccd_convex_convex) mod.addCMacro("dLIBCCD_CONVEX_CONVEX", "1");
-        if (libccd_convex_cyl) mod.addCMacro("dLIBCCD_CONVEX_CYL", "1");
-        if (libccd_convex_sphere) mod.addCMacro("dLIBCCD_CONVEX_SPHERE", "1");
+        if (libccd_box_cyl) lib_mod.addCMacro("dLIBCCD_BOX_CYL", "1");
+        if (libccd_cap_cyl) lib_mod.addCMacro("dLIBCCD_CAP_CYL", "1");
+        if (libccd_cyl_cyl) lib_mod.addCMacro("dLIBCCD_CYL_CYL", "1");
+        if (libccd_convex_box) lib_mod.addCMacro("dLIBCCD_CONVEX_BOX", "1");
+        if (libccd_convex_cap) lib_mod.addCMacro("dLIBCCD_CONVEX_CAP", "1");
+        if (libccd_convex_convex) lib_mod.addCMacro("dLIBCCD_CONVEX_CONVEX", "1");
+        if (libccd_convex_cyl) lib_mod.addCMacro("dLIBCCD_CONVEX_CYL", "1");
+        if (libccd_convex_sphere) lib_mod.addCMacro("dLIBCCD_CONVEX_SPHERE", "1");
     }
 
     // Trimesh configuration
     switch (trimesh) {
         .none => {},
         .opcode, .opcode_old => {
-            mod.addCSourceFiles(.{
+            lib_mod.addCSourceFiles(.{
                 .root = upstream.path(""),
                 .files = opcode_sources,
                 .flags = cpp_flags,
             });
 
             if (trimesh == .opcode_old) {
-                mod.addCMacro("dTRIMESH_OPCODE_USE_OLD_TRIMESH_TRIMESH_COLLIDER", "1");
+                lib_mod.addCMacro("dTRIMESH_OPCODE_USE_OLD_TRIMESH_TRIMESH_COLLIDER", "1");
             }
 
-            mod.addIncludePath(upstream.path("OPCODE"));
-            mod.addIncludePath(upstream.path("OPCODE/Ice"));
+            lib_mod.addIncludePath(upstream.path("OPCODE"));
+            lib_mod.addIncludePath(upstream.path("OPCODE/Ice"));
         },
         .gimpact => {
-            mod.addCSourceFiles(.{
+            lib_mod.addCSourceFiles(.{
                 .root = upstream.path(""),
                 .files = gimpact_sources,
                 .flags = cpp_flags,
             });
 
-            mod.addIncludePath(upstream.path("GIMPACT/include"));
+            lib_mod.addIncludePath(upstream.path("GIMPACT/include"));
         },
     }
 
     b.installArtifact(lib);
 
     // Zig module
-    const zig_mod = b.addModule("ode", .{
+    const mod = b.addModule("ode", .{
         .root_source_file = b.path("src/ode.zig"),
     });
-    configureOdeIncludes(zig_mod, b, upstream, precision, trimesh, index_size);
-    zig_mod.linkLibrary(lib);
+    configureOdeIncludes(mod, b, upstream, precision, trimesh, index_size);
+    mod.linkLibrary(lib);
 
     // Tests
     const tests = b.addTest(.{
@@ -181,6 +195,28 @@ pub fn build(b: *std.Build) void {
     tests.root_module.linkLibrary(lib);
     const run_tests = b.addRunArtifact(tests);
     b.step("test", "Run ODE binding tests").dependOn(&run_tests.step);
+
+    // Examples
+    const examples = [_]struct { name: []const u8, path: []const u8 }{
+        .{ .name = "chain", .path = "examples/chain.zig" },
+        .{ .name = "hinge", .path = "examples/hinge.zig" },
+        .{ .name = "slider", .path = "examples/slider.zig" },
+    };
+
+    for (examples) |ex| {
+        const exe = b.addExecutable(.{
+            .name = ex.name,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(ex.path),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = "ode", .module = mod }},
+            }),
+        });
+        b.installArtifact(exe);
+        const run = b.addRunArtifact(exe);
+        b.step(b.fmt("example-{s}", .{ex.name}), b.fmt("Run {s} example", .{ex.name})).dependOn(&run.step);
+    }
 }
 
 fn configureOdeIncludes(
@@ -248,7 +284,7 @@ const ode_sources: []const []const u8 = &.{
     "ode/src/fastltsolve.cpp",
     "ode/src/fastvecscale.cpp",
     "ode/src/heightfield.cpp",
-    "ode/src/lcp.cpp",
+    // lcp.cpp compiled separately with -fno-sanitize=bool (see above)
     "ode/src/mass.cpp",
     "ode/src/mat.cpp",
     "ode/src/matrix.cpp",
