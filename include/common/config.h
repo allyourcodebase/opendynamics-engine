@@ -20,13 +20,17 @@
 #define HAVE_ISNANF 1
 
 /* Define to 1 if you have the <malloc.h> header file. */
+#if !defined(__APPLE__)
 #define HAVE_MALLOC_H 1
+#endif
 
 /* Define to 1 if you have the `pthread_attr_setstacklazy' function. */
 // #define HAVE_PTHREAD_ATTR_SETSTACKLAZY 1
 
 /* Define to 1 if you have the `pthread_condattr_setclock' function. */
+#if !defined(__APPLE__)
 #define HAVE_PTHREAD_CONDATTR_SETCLOCK 1
+#endif
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1
